@@ -170,9 +170,9 @@ button{font-family:var(--fm);cursor:pointer}input,select{font-family:var(--fm)}
 <div id="settings">
   <div class="st-box">
     <div class="st-t">CONFIGURATION</div>
-    <div class="st-l">Grok API Key</div>
-    <input class="st-i" id="st-key" type="password" placeholder="xai-…">
-    <div class="st-n">Your xAI Grok key. Stays in-browser — sent only to api.x.ai.</div>
+    <div class="st-l">Cloudflare Worker URL</div>
+    <input class="st-i" id="st-worker" placeholder="https://worldview-grok.your-subdomain.workers.dev">
+    <div class="st-n">Your Cloudflare Worker proxy URL. The worker holds your Grok API key securely — no keys in the browser.</div>
     <div class="st-l">Model</div>
     <select class="st-i" id="st-model" style="cursor:pointer">
       <option value="grok-3-mini">grok-3-mini (cheapest)</option>
@@ -251,7 +251,7 @@ button{font-family:var(--fm);cursor:pointer}input,select{font-family:var(--fm)}
     <button class="ai-q" onclick="qAI('Airspace closure impact on commercial aviation')">Airspace</button>
     <button class="ai-q" onclick="qAI('Correlate satellite passes with strike timing')">Correlation</button>
   </div>
-  <div id="ai-msgs"><div class="ai-m s">Grok ready. Add API key in ⚙</div></div>
+  <div id="ai-msgs"><div class="ai-m s">Grok ready. Set worker URL in ⚙</div></div>
   <div class="ai-in">
     <input type="text" id="ai-box" placeholder="Ask Grok…" onkeydown="if(event.key==='Enter')sendGrok()">
     <button id="ai-snd" onclick="sendGrok()">▶</button>
@@ -294,7 +294,7 @@ const EVT=[{t:0,lb:"Pre-Strike: Satellite buildup over targets",ph:"buildup"},{t
 
 // ═══ STATE ═══
 let T=0,playing=false,spVal=1,ly={targets:1,satellites:1,flights:1,jamming:1,maritime:1,airspace:1};
-let grokKey='',grokModel='grok-3-mini',grokMax=256,tokUsed=0;
+let grokModel='grok-3-mini',grokMax=256,tokUsed=0,workerUrl='';
 let scene,camera,renderer,globeGrp,dynGrp;
 let drag={on:false,px:0,py:0},rot={x:.35,y:-.85},camZ=3.0;
 
@@ -314,9 +314,9 @@ function pinDots(){document.querySelectorAll('.pg-dot').forEach((d,i)=>d.classLi
 document.addEventListener('keydown',e=>{if(document.getElementById('pin-gate').style.display==='none')return;if(e.key>='0'&&e.key<='9')pinKey(parseInt(e.key));else if(e.key==='Backspace')pinKey('⌫')});
 
 // ═══ CONFIG ═══
-function openCfg(){document.getElementById('settings').style.display='flex';document.getElementById('st-key').value=grokKey;document.getElementById('st-model').value=grokModel;document.getElementById('st-maxtok').value=grokMax}
+function openCfg(){document.getElementById('settings').style.display='flex';document.getElementById('st-worker').value=workerUrl;document.getElementById('st-model').value=grokModel;document.getElementById('st-maxtok').value=grokMax}
 function closeCfg(){document.getElementById('settings').style.display='none'}
-function saveCfg(){grokKey=document.getElementById('st-key').value.trim();grokModel=document.getElementById('st-model').value;grokMax=parseInt(document.getElementById('st-maxtok').value)||256;closeCfg();aiMsg('s',`Saved. Model: ${grokModel}, max ${grokMax} tok.`)}
+function saveCfg(){workerUrl=document.getElementById('st-worker').value.trim().replace(/\/$/,'');grokModel=document.getElementById('st-model').value;grokMax=parseInt(document.getElementById('st-maxtok').value)||256;closeCfg();aiMsg('s',`Saved. Worker: ${workerUrl?'connected':'not set'}. Model: ${grokModel}, max ${grokMax} tok.`)}
 
 // ═══ INIT ═══
 function initApp(){buildLists();buildMarkers();initGlobe();setInterval(()=>{const d=new Date();document.getElementById('clock').textContent=d.toUTCString().split(' ')[4].slice(0,5)+' UTC'},1000);setInterval(tick,50);setupSearch()}
@@ -433,12 +433,12 @@ function aiMsg(role,txt){const c=document.getElementById('ai-msgs');const m=docu
 function qAI(p){document.getElementById('ai-box').value=p;sendGrok()}
 async function sendGrok(){
   const box=document.getElementById('ai-box'),q=box.value.trim();if(!q)return;box.value='';aiMsg('u',q);
-  if(!grokKey){aiMsg('s','No API key. Open ⚙ to configure.');return}
+  if(!workerUrl){aiMsg('s','No worker URL set. Open ⚙ to configure.');return}
   const ev=curEvt(),aLy=Object.entries(ly).filter(([,v])=>v).map(([k])=>k).join(','),cAir=AIRSPC.filter(a=>T>=55+a.off*.5).map(a=>a.co).join(',')||'none';
   const sys=`OSINT analyst. Op Epic Fury. T=${T.toFixed(0)}% phase:${ev.ph}. "${ev.lb}" Layers:${aLy}. Sats:${SATS.map(s=>s.id).join(',')}. Flights:${FLTS.map(f=>f.id+(f.div?'(div)':'')).join(',')}. Vessels:${VES.map(v=>v.name+'('+v.st+')').join(',')}. GPS jam:${JAM.map(j=>j.lb).join(',')}. Airspace closed:${cAir}. Concise intel analyst tone.`;
   aiMsg('s','Analyzing…');
   try{
-    const r=await fetch('https://api.x.ai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+grokKey},body:JSON.stringify({model:grokModel,messages:[{role:'system',content:sys},{role:'user',content:q}],max_tokens:grokMax,temperature:.35})});
+    const r=await fetch(workerUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:grokModel,messages:[{role:'system',content:sys},{role:'user',content:q}],max_tokens:grokMax,temperature:.35})});
     const d=await r.json();const msgs=document.getElementById('ai-msgs');const last=msgs.querySelector('.ai-m.s:last-child');if(last&&last.textContent==='Analyzing…')last.remove();
     if(d.error){aiMsg('s','Error: '+(d.error.message||'Failed'));return}
     aiMsg('a',d.choices?.[0]?.message?.content||'No response.');
